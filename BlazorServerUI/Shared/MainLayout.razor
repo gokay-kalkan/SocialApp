@@ -1,0 +1,60 @@
+﻿@inherits LayoutComponentBase
+@inject NavigationManager NavigationManager
+@inject ILocalStorageService LocalStorage
+@inject NotificationService NotificationService
+@using BlazorServerUI.Services.NotificationServices
+@using Blazored.LocalStorage
+<PageTitle>BlazorServerUI</PageTitle>
+
+@* <div class="page">
+    <div class="sidebar">
+        <CascadingValue Value="navMenu">
+            <NavMenu @ref="navMenu" />
+        </CascadingValue>
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+            <a href="https://docs.microsoft.com/aspnet/" target="_blank">About</a>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div> *@
+<CascadingValue Value="NavMenu">
+    <div class="page">
+        <div class="sidebar">
+            <NavMenu @ref="NavMenu" />
+        </div>
+
+        <main>
+            <div class="top-row px-4">
+                <a href="https://docs.microsoft.com/aspnet/" target="_blank">About</a>
+            </div>
+
+            <article class="content px-4">
+                @Body
+            </article>
+        </main>
+    </div>
+</CascadingValue>
+@code {
+    private NavMenu NavMenu { get; set; }
+  
+    protected override async Task OnInitializedAsync()
+    {
+        var token = await LocalStorage.GetItemAsync<string>("authToken");
+        var currentUri = NavigationManager.Uri.ToLower();
+
+     
+        if (string.IsNullOrEmpty(token) && !currentUri.Contains("/login") && !currentUri.Contains("/register"))
+        {
+            NavigationManager.NavigateTo("/login", true);
+        }
+        
+    }
+
+  
+}

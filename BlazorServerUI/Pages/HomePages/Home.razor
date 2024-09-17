@@ -1,0 +1,289 @@
+﻿@page "/home"
+@using BlazorServerUI.AuthenticationProvider
+@using BlazorServerUI.Data.CommentDtos
+@using BlazorServerUI.Data.PostDtos
+@using BlazorServerUI.Services.PostServices
+@using BlazorServerUI.Services.CommentServices
+@using BlazorServerUI.Services.LikeServices
+@inject PostService PostService
+@inject CommentService CommentService
+@inject LikeService LikeService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject CustomAuthStateProvider CustomAuthenticationStateProvider
+
+<h3>Takip Ettiğiniz Kullanıcıların Paylaşımları</h3>
+
+@if (posts == null)
+{
+    <p>Yükleniyor...</p>
+}
+else if (posts.Count == 0)
+{
+    <p>Henüz bir paylaşım yok.</p>
+}
+else
+{
+    <div class="post-list">
+        @foreach (var post in posts)
+        {
+            <div class="post-card">
+                <div class="post-header">
+                    <img src="@post.UserProfilePicture" alt="User Profile Picture" class="profile-picture" />
+                    <strong>@post.UserName</strong>
+                </div>
+                <div class="post-content">
+                    <p>@post.Content</p>
+                    @if (!string.IsNullOrEmpty(post.ImageUrl))
+                    {
+                        <img src="@post.ImageUrl" alt="Post Image" class="post-image" />
+                    }
+                </div>
+                <div class="post-footer">
+                    <span>@post.CreatedDate.ToString("g")</span>
+                    <button class="like-button" @onclick="() => ToggleLike(post)">
+                        <span class="heart-icon" style="color: @(post.IsLikedByCurrentUser ? "red" : "grey")">
+                            ♥
+                        </span>
+                    </button>
+                    <span class="like-count" @onclick="() => ShowPostLikes(post.PostId)" style="margin-left:-10px;">@post.LikesCount</span>
+                    <span class="comment-count" @onclick="() => ToggleCommentSection(post.PostId)" style="margin-right:-70px">
+                        @post.CommentsCount Yorum
+                    </span>
+                </div>
+
+                @if (post.ShowCommentSection)
+                {
+                    <div class="comment-section">
+                        <input @bind="@post.NewCommentContent" placeholder="Yorum yazın..." class="comment-input" />
+                        <button @onclick="() => AddComment(post.PostId, post.NewCommentContent)">Gönder</button>
+                        <div class="comments-list">
+                            @foreach (var comment in post.Comments)
+                            {
+                                <p><strong>@comment.UserName:</strong> @comment.Content</p>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@if (showLikes)
+{
+    <div class="likes-list">
+        <h5>Beğenenler</h5>
+        @if (postLikes != null && postLikes.Any())
+        {
+            @foreach (var like in postLikes)
+            {
+                <div class="like-item">
+                    <img src="@like.ProfilePicture" class="mini-profile-picture" />
+                    <span>@like.UserName</span>
+                </div>
+            }
+        }
+        else
+        {
+            <p>Bu gönderiye henüz beğeni yapılmamış.</p>
+        }
+    </div>
+}
+
+@code {
+    private List<FollowedUsersPostListDto> posts;
+    private string currentUserName;
+    private List<PostLikeDto> postLikes = new List<PostLikeDto>();
+    private bool showLikes = false;
+    protected override async Task OnInitializedAsync()
+    {
+        posts = await PostService.GetFollowedUsersPostsAsync();
+
+        var authState = await CustomAuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        currentUserName = user.Claims.FirstOrDefault(c => c.Type == "unique_name")?.Value;
+    }
+
+    private async Task ToggleLike(FollowedUsersPostListDto post)
+    {
+        var response = await LikeService.LikePostAsync(post.PostId);
+        if (response.Success)
+        {
+            post.IsLikedByCurrentUser = !post.IsLikedByCurrentUser;
+            post.LikesCount += post.IsLikedByCurrentUser ? 1 : -1;
+
+        }
+    }
+
+
+    private async Task ToggleCommentSection(int postId)
+    {
+        var post = posts.FirstOrDefault(p => p.PostId == postId);
+        if (post != null)
+        {
+            post.ShowCommentSection = !post.ShowCommentSection;
+
+       
+            if (post.ShowCommentSection && post.Comments.Count == 0)
+            {
+                var comments = await CommentService.GetCommentsForFollowedUsersPostsAsync();
+
+                // GetCommentsForUserDto -> CommentDto dönüştürme
+                var postComments = comments
+                    .Where(c => c.PostId == postId)
+                    .Select(c => new CommentDto
+                        {
+                            CommentId = c.CommentId,
+                            PostId = c.PostId,
+                            Content = c.Content,
+                            CreatedDate = c.CreatedDate,
+                            UserName = c.UserName
+                        })
+                    .ToList();
+
+                // Yorumları posta ekle
+                post.Comments = postComments;
+            }
+        }
+    }
+
+
+
+    private async Task AddComment(int postId, string commentContent)
+    {
+        var commentDto = new CreateCommentDto
+            {
+                PostId = postId,
+                Content = commentContent
+            };
+
+        await CommentService.AddCommentAsync(commentDto);
+        var userName = currentUserName;
+        var post = posts.FirstOrDefault(p => p.PostId == postId);
+        if (post != null)
+        {
+            post.Comments.Add(new CommentDto
+                {
+                    Content = commentContent,
+                    UserName = userName,
+                    CreatedDate = DateTime.Now
+                });
+
+            post.NewCommentContent = string.Empty;
+        }
+    }
+
+    private async Task ShowPostLikes(int postId)
+    {
+        showLikes = !showLikes;
+
+        if (showLikes)
+        {
+            var response = await LikeService.GetPostLikesAsync(postId);
+            if (response.Success)
+            {
+                postLikes = response.Data;
+            }
+            else
+            {
+                Console.WriteLine("Beğeniler yüklenirken hata oluştu.");
+            }
+        }
+    }
+}
+
+<style>
+
+    .heart-icon {
+        font-size: 1.5em; /* İkon boyutu */
+        cursor: pointer;
+        transition: color 0.3s;
+    }
+
+        .heart-icon:hover {
+            color: red; /* Üzerine gelindiğinde kırmızı olur */
+        }
+
+    .like-button {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1.5em; /* İkon boyutu */
+    }
+
+    .like-count {
+        margin-left: 10px;
+        font-size: 1.1em;
+        color: #666;
+    }
+
+    .mini-profile-picture {
+        width: 30px;
+        height: 30px;
+        margin-right: 5px;
+        border-radius: 50%;
+    }
+
+    .comment-section {
+        margin-top: 10px;
+    }
+
+    .comment-input {
+        width: 100%;
+        margin-bottom: 10px;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+    }
+
+    .comments-list {
+        margin-top: 10px;
+        border-top: 1px solid #ddd;
+        padding-top: 10px;
+    }
+
+    .post-list {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+    }
+
+    .post-card {
+        border: 1px solid #ddd;
+        padding: 15px;
+        border-radius: 10px;
+        background-color: #fff;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+
+    .post-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .profile-picture {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+    }
+
+    .post-content {
+        margin-top: 15px;
+    }
+
+    .post-image {
+        max-width: 100%;
+        border-radius: 10px;
+        margin-top: 10px;
+    }
+
+    .post-footer {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+        font-size: 0.9em;
+        color: #666;
+    }
+</style>

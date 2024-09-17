@@ -1,0 +1,62 @@
+﻿@page "/users"
+@using BlazorServerUI.Services.UserServices
+@inject UserService UserService
+@inject NavigationManager NavigationManager
+
+<h3>Kullanıcılar</h3>
+
+@if (isLoading)
+{
+    <p>Yükleniyor...</p>
+}
+else if (users.Any())
+{
+    <div class="row">
+        @foreach (var user in users)
+        {
+            <div class="col-md-4 mb-3">
+                <div class="card shadow-sm">
+                    <img src="@user.ProfilePicture" class="card-img-top" alt="@user.UserName" style="height: 200px; object-fit: cover; border-radius: 10px 10px 0 0;" />
+                    <div class="card-body text-center">
+                        <h5 class="card-title">@user.UserName</h5>
+                        <button class="btn btn-primary" @onclick="() => GoToUserProfile(user.UserId)">Profili Görüntüle</button>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+else
+{
+    <p>Listelenecek kullanıcı yok.</p>
+}
+
+@code {
+    private List<UserProfileDto> users = new List<UserProfileDto>();
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsers();
+    }
+
+    private async Task LoadUsers()
+    {
+        isLoading = true;
+        var response = await UserService.GetOtherUsersAsync();
+        if (response.Success)
+        {
+            users = response.Data;
+        }
+        else
+        {
+            Console.WriteLine("Kullanıcılar yüklenirken hata oluştu.");
+        }
+        isLoading = false;
+    }
+
+    private void GoToUserProfile(string userId)
+    {
+        NavigationManager.NavigateTo($"/profiles/{userId}");
+    }
+}

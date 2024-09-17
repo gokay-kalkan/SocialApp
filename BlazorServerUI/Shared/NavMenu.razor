@@ -1,0 +1,139 @@
+﻿@using BlazorServerUI.AuthenticationProvider
+@using BlazorServerUI.Services.MessageServices
+@using BlazorServerUI.Services.NotificationServices
+@using BlazorServerUI.Services.UserServices
+@using Blazored.LocalStorage
+
+@inject CustomAuthStateProvider CustomAuthenticationStateProvider
+@inject UserService UserService
+@inject NavigationManager NavigationManager
+@inject ILocalStorageService LocalStorage
+@inject NotificationService NotificationService
+@inject MessageService MessageService
+
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">BlazorServerUI</a>
+        <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+    </div>
+</div>
+
+<div class="@NavMenuCssClass" @onclick="ToggleNavMenu">
+    <nav class="flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="/home" Match="NavLinkMatch.All">
+                <i class="fas fa-home"></i> Ana Sayfa
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="/users" Match="NavLinkMatch.All">
+                <i class="fas fa-home"></i> Takip Edebileceğin Kişiler
+            </NavLink>
+        </div>
+    
+        <script>
+            window.updateUnreadMessageCount = function (count) {
+                const badge = document.querySelector('.unread-message-count');
+                if (badge) {
+                    badge.textContent = count > 0 ? count : '';
+                }
+            }
+        </script>
+
+      
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="/messages">
+                <i class="fas fa-envelope"></i> Mesajlar
+                @if (unreadMessageCount > 0)
+                {
+                    <span class="badge bg-danger">@unreadMessageCount</span>
+                }
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="/notifications">
+                <i class="fas fa-bell"></i> Bildirimler @if (notificationCount > 0)
+                {
+                    <span class="badge bg-danger">@notificationCount</span>
+                }
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="/profiles">
+                <i class="fas fa-bell"></i> Profilim
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <button class="btn btn-link nav-link" @onclick="Logout">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </button>
+        </div>
+    </nav>
+</div>
+
+@code {
+    private bool isLoggedIn = false;
+    private bool collapseNavMenu = true;
+    private int unreadMessageCount = 0;
+    private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
+    private int notificationCount = 0;
+
+    private void ToggleNavMenu()
+    {
+        collapseNavMenu = !collapseNavMenu;
+    }
+    protected override async Task OnInitializedAsync()
+    {
+
+        var authState = await CustomAuthenticationStateProvider.GetAuthenticationStateAsync();
+        isLoggedIn = authState.User.Identity.IsAuthenticated;
+  
+        if (isLoggedIn)
+        {
+            try
+            {
+                // Kullanıcı giriş yaptıysa mesaj sayısını yükle
+                unreadMessageCount = await MessageService.GetUnreadMessageCountAsync();
+                notificationCount = await NotificationService.GetNotificationCountAsync();
+
+                
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                // Eğer 401 hatası alınırsa kullanıcıyı yönlendirin veya hata mesajı gösterin
+                Console.WriteLine("Yetkisiz erişim. Lütfen giriş yapın.");
+                // Gerekirse kullanıcıyı giriş sayfasına yönlendirin
+                NavigationManager.NavigateTo("/login", true);
+            }
+        }
+
+        unreadMessageCount = await MessageService.GetUnreadMessageCountAsync();
+
+    }
+ 
+    public async Task UpdateNotificationCount()
+    {
+        notificationCount = await NotificationService.GetNotificationCountAsync();
+        Console.WriteLine($"Notification count updated: {notificationCount}");
+        StateHasChanged();
+    }
+
+  
+    public async Task UpdateUnreadMessageCount()
+    {
+        unreadMessageCount = await MessageService.GetUnreadMessageCountAsync();
+        StateHasChanged(); // Ekranı güncelle
+    }
+    private async Task Logout()
+    {
+        await LocalStorage.RemoveItemAsync("authToken");
+        NavigationManager.NavigateTo("/login", true);
+    }
+}
+

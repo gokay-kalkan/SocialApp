@@ -1,0 +1,34 @@
+﻿@using Blazored.LocalStorage
+@inject NavigationManager NavigationManager
+@inject ILocalStorageService LocalStorage
+
+<CascadingAuthenticationState>
+    <Router AppAssembly="@typeof(App).Assembly">
+        <Found Context="routeData">
+            @if (routeData.PageType == typeof(Pages.UserPages.Login))
+            {
+                <!-- Eğer login sayfasıysa layout kullanılmaz -->
+                <RouteView RouteData="@routeData" DefaultLayout="null" />
+            }
+            else if (routeData.PageType == typeof(Pages.UserPages.Register))
+            {
+                <!-- Eğer login sayfasıysa layout kullanılmaz -->
+                <RouteView RouteData="@routeData" DefaultLayout="null" />
+            }
+            else
+            {
+                <!-- Diğer sayfalar için MainLayout kullanılır -->
+                <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+            }
+            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+        </Found>
+
+        <NotFound>
+            <LayoutView Layout="@typeof(MainLayout)">
+                <p>Sorry, there's nothing at this address.</p>
+            </LayoutView>
+        </NotFound>
+    </Router>
+</CascadingAuthenticationState>
+
+

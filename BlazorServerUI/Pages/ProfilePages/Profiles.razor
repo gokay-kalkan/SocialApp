@@ -1,0 +1,1266 @@
+﻿@page "/profiles/{UserId?}"
+@using BlazorServerUI.Data.CommentDtos
+@using BlazorServerUI.Data.MessageDtos
+@using BlazorServerUI.Data.PostDtos
+@using BlazorServerUI.Services.CommentServices
+@using BlazorServerUI.Services.LikeServices
+@using BlazorServerUI.Services.MessageServices
+@using BlazorServerUI.Services.PostServices
+@using BlazorServerUI.Services.UserProfileServices
+@using BlazorServerUI.Services.UserServices
+@using BlazorServerUI.Services.FollowerServices
+@using BlazorServerUI.AuthenticationProvider
+@using System.Net.Http.Headers
+@inject IJSRuntime JS;
+@inject NavigationManager NavigationManager
+@inject ProfileService ProfileService
+@inject FollowerService FollowerService
+@inject PostService PostService
+@inject CommentService CommentService
+@inject LikeService LikeService
+@inject MessageService MessageService
+@inject CustomAuthStateProvider CustomAuthenticationStateProvider
+
+
+<h3>@(isOwnProfile ? "Profilim" : $"{profileUserName} Profili")</h3>
+
+@if (isLoading)
+{
+    <p>Yükleniyor...</p>
+}
+
+else
+{
+    <div class="profile-card">
+        <img src="@profilePicture" alt="Profil Resmi" class="profile-picture" />
+
+        @if (isOwnProfile)
+        {
+            <h4>@currentUserName <button class="edit-button" @onclick="ShowEditNameModal">✏️</button></h4>
+            <br />
+            <h4>@Name @Surname </h4>
+
+        }
+        else
+        {
+
+            <h4>@profileUserName</h4>
+            <h4>@Name @Surname </h4>
+        }
+
+
+        @if (isEditNameModalOpen)
+        {
+            <div class="edit-modal">
+                <h4>Ad ve Soyad Güncelle</h4>
+                <input type="text" @bind="newName" placeholder="Yeni Ad" class="form-control" />
+                <input type="text" @bind="newSurname" placeholder="Yeni Soyad" class="form-control mt-2" />
+                <input type="text" @bind="newUserName" placeholder="Yeni Kullanıcı Adı" class="form-control mt-2" />
+                <button class="btn btn-primary mt-2" @onclick="UpdateUserName">Güncelle</button>
+                <button class="btn btn-secondary mt-2" @onclick="CloseEditNameModal">İptal</button>
+            </div>
+        }
+        <p><a @onclick="ShowFollowing">Takip Edilenler: @followingCount</a></p>
+        <p><a @onclick="ShowFollowers">Takipçiler: @followersCount</a></p>
+
+        @if (!isOwnProfile)
+        {
+            @if (isFollowing)
+            {
+                <button class="btn btn-warning mt-2" @onclick="UnfollowUser">Takipten Çıkar</button>
+            }
+            else if (followRequestSent)
+            {
+                <button class="btn btn-secondary mt-2" disabled>Takip İsteği Gönderildi</button>
+            }
+            else
+            {
+                <button class="btn btn-primary mt-2" @onclick="FollowUser">Takip Et</button>
+            }
+
+            <!-- Mesaj Gönder Butonu -->
+            <button class="btn btn-secondary mt-2" @onclick="OpenMessageModal">Mesaj Gönder</button>
+        }
+
+
+
+        @if (isOwnProfile)
+        {
+            <InputFile OnChange="UploadProfilePicture" class="form-control" />
+            <button class="btn btn-danger mt-2" @onclick="DeleteProfilePicture">Profil Resmini Sil</button>
+        }
+
+        @if (showFollowing)
+        {
+            <div>
+                <h5>Takip Edilenler</h5>
+                @foreach (var user in followingUsers)
+                {
+                    <p>
+                        <img src="@user.ProfilePicture" class="mini-profile-picture" />
+                        <a @onclick="() => NavigateToProfile(user.UserId)">@user.UserName</a>
+                    </p>
+                }
+            </div>
+        }
+
+        @if (showFollowers)
+        {
+            <div>
+                <h5>Takipçiler</h5>
+                @foreach (var user in followers)
+                {
+                    <p>
+                        <img src="@user.ProfilePicture" class="mini-profile-picture" />
+                        <a @onclick="() => NavigateToProfile(user.UserId)">@user.UserName</a>
+                    </p>
+                }
+            </div>
+        }
+    </div>
+}
+
+@* Gönderi Paylaşma Alanı *@
+@if (isOwnProfile)
+{
+    <div class="post-creation">
+        <h5>Gönderi Paylaş</h5>
+        <textarea @bind="postContent" class="form-control" placeholder="Ne hakkında paylaşmak istersiniz?" rows="4"></textarea>
+        <InputFile OnChange="HandleFileSelected" class="form-control mt-2" />
+        <button class="btn btn-success mt-2" @onclick="CreatePost">Gönderiyi Paylaş</button>
+    </div>
+}
+
+<h5 class="mt-4">Gönderiler</h5>
+@{
+    var unifiedPosts = (isOwnProfile
+        ? posts.Select(p => new UnifiedPostDto
+                {
+                    PostId = p.PostId,
+                    Content = p.Content,
+                    ImageUrl = p.ImageUrl,
+                    CreatedDate = p.CreatedDate,
+                    IsLikedByCurrentUser = p.IsLikedByCurrentUser,
+                    LikesCount = p.LikesCount,
+                    CommentsCount = p.CommentsCount,
+                    ShowCommentSection = p.ShowCommentSection,
+                    UserId = p.UserId,
+                    Comments = p.Comments
+
+                })
+        : postsFollowed.Select(pf => new UnifiedPostDto
+                {
+                    PostId = pf.PostId,
+                    Content = pf.Content,
+                    ImageUrl = pf.ImageUrl,
+                    CreatedDate = pf.CreatedDate,
+                    IsLikedByCurrentUser = pf.IsLikedByCurrentUser,
+                    LikesCount = pf.LikesCount,
+                    CommentsCount = pf.CommentsCount,
+                    ShowCommentSection = pf.ShowCommentSection,
+                    UserId = pf.UserId,
+                    Comments = pf.Comments
+                })).ToList();
+}
+
+@if (unifiedPosts.Any())
+{
+    <ul class="post-list">
+        @foreach (var post in unifiedPosts)
+        {
+            <li class="post-item">
+                <div class="post-header">
+                    <p>@post.Content</p>
+                    @if (isOwnProfile)
+                    {
+                        <button class="edit-button" @onclick="() => OpenEditModal(post)">🖉</button>
+                        <button class="delete-button" @onclick="() => DeletePost(post.PostId)">×</button>
+                    }
+
+                </div>
+
+                @if (!string.IsNullOrEmpty(post.ImageUrl))
+                {
+                    <img src="@post.ImageUrl" alt="Media" class="post-media" />
+                }
+                <small>@post.CreatedDate.ToString("g")</small>
+
+                <!-- Beğeni ve Yorum Bölümü -->
+                <div class="post-footer">
+                    <button class="like-button" @onclick="() => ToggleLike(post)">
+                        <span class="heart-icon" style="color: @(post.IsLikedByCurrentUser ? "red" : "grey")">
+                            ♥
+                        </span>
+                    </button>
+                    <span class="like-count" @onclick="() => ShowPostLikes(post.PostId)">@post.LikesCount</span>
+                    <span class="comment-count" @onclick="() => ToggleCommentSection(post.PostId)">
+                        @post.CommentsCount Yorum
+                    </span>
+                </div>
+
+
+                @if (post.ShowCommentSection)
+                {
+                    <div class="comment-section">
+                        <input @bind-value="newCommentContent"
+                               placeholder="Yorum yazın..."
+                               class="comment-input" />
+                        <button @onclick="() => AddComment(post.PostId, newCommentContent)">Gönder</button>
+                        <div class="comments-list">
+                            @foreach (var comment in post.Comments)
+                            {
+                                <div class="comment">
+                                    <p>
+                                        <strong>@comment.UserName:</strong> @comment.Content
+                                        @if (comment.UserId == currentUserId || post.UserId == currentUserId)
+                                        {
+                                            <button class="delete-comment" @onclick="() => DeleteComment(post.PostId, comment.CommentId)">🗑</button>
+                                            if (comment.UserId == currentUserId)
+                                            {
+                                                <button class="edit-comment" @onclick="() => OpenEditCommentModal(post.PostId, comment)">✏️</button>
+                                            }
+                                        }
+                                    </p>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </li>
+        }
+
+    </ul>
+}
+else if (isOwnProfile)
+{
+    <p>Henüz bir gönderiniz yok.</p>
+}
+
+@if (showLikes)
+{
+    <div class="likes-list">
+        <h5>Beğenenler</h5>
+        @if (postLikes != null && postLikes.Any())
+        {
+            @foreach (var like in postLikes)
+            {
+                <div class="like-item">
+                    <img src="@like.ProfilePicture" class="mini-profile-picture" />
+                    <span>@like.UserName</span>
+                </div>
+            }
+        }
+        else
+        {
+            <p>Bu gönderiye henüz beğeni yapılmamış.</p>
+        }
+    </div>
+}
+
+@* Güncelleme Formu *@
+@if (isEditModalOpen)
+{
+    <div class="edit-modal">
+        <h4>Gönderiyi Güncelle</h4>
+        <textarea @bind="selectedPostContent" class="form-control" rows="4"></textarea>
+        <InputFile OnChange="HandleEditFileSelected" class="form-control mt-2" />
+        <button class="btn btn-primary mt-2" @onclick="UpdatePost">Güncelle</button>
+        <button class="btn btn-secondary mt-2" @onclick="CloseEditModal">İptal</button>
+    </div>
+}
+
+<!-- Mesaj Gönder Modalı -->
+@if (isMessageModalOpen)
+{
+    <div class="message-modal-backdrop">
+        <div class="message-modal">
+            <h4>@(profileUserName ?? "Kullanıcı")'a Mesaj Gönder</h4>
+            <textarea @bind="newMessageContent" class="form-control" rows="4" placeholder="Mesajınızı yazın..."></textarea>
+
+            <!-- Resim Yükleme Alanı -->
+            <InputFile OnChange="HandleFileSelected" class="form-control mt-2" />
+            @if (selectedFile != null)
+            {
+                <p>Seçilen Dosya: @selectedFile.Name</p>
+            }
+
+            <button class="btn btn-primary mt-2" @onclick="SendMessage">Gönder</button>
+            <button class="btn btn-secondary mt-2" @onclick="() => CloseModal()">İptal</button>
+        </div>
+    </div>
+}
+
+@if (isEditCommentModalOpen)
+{
+    <div class="edit-modal">
+        <h4>Yorumu Düzenle</h4>
+        <textarea @bind="editingCommentContent" class="form-control" rows="3"></textarea>
+        <button class="btn btn-primary mt-2" @onclick="UpdateComment">Güncelle</button>
+        <button class="btn btn-secondary mt-2" @onclick="CloseEditCommentModal">İptal</button>
+    </div>
+}
+
+@code {
+    private bool isMessageModalOpen = false;
+    private string newMessageContent = string.Empty;
+    private bool isEditModalOpen = false;
+    private string? profilePicture = "/uploads/default-profile.png"; // Varsayılan profil resmi
+    private UnifiedPostDto selectedPost;
+    private string selectedPostContent = string.Empty;
+    private IBrowserFile? selectedEditFile = null;
+    private string? currentUserName;
+    private string? profileUserName;
+    private string? currentUserId;
+    private string? Name;
+    private string? Surname;
+    private bool followRequestSent = false; // Takip isteği gönderilip gönderilmediğini kontrol eder
+    private bool isFollowing = false;
+    private int followersCount = 0;
+    private int followingCount = 0;
+    private bool isLoading = false;
+    private bool isOwnProfile = true;
+    private bool showFollowing = false;
+    private bool showFollowers = false;
+    private List<UserProfileDto> followingUsers = new List<UserProfileDto>();
+    private List<UserProfileDto> followers = new List<UserProfileDto>();
+    private List<PostListDto> posts = new List<PostListDto>();
+    private List<UnifiedPostDto> unifiedpost = new List<UnifiedPostDto>();
+    private List<FollowedUsersPostListDto> postsFollowed = new List<FollowedUsersPostListDto>();
+    private string postContent = string.Empty;
+    private string newCommentContent = string.Empty;
+
+    private bool isEditCommentModalOpen = false;
+    private string editingCommentContent = string.Empty;
+    private int editingCommentId;
+    private int editingPostId;
+
+    private IBrowserFile? selectedFile = null;
+
+    private List<PostLikeDto> postLikes = new List<PostLikeDto>();
+    private bool showLikes = false;
+
+    private bool isEditNameModalOpen = false;
+    private string newName = string.Empty;
+    private string newSurname = string.Empty;
+    private string newUserName = string.Empty;
+    [Parameter]
+    public string? UserId { get; set; } = null;
+
+    // Parametre değiştiğinde tetiklenen metod
+    protected override async Task OnInitializedAsync()
+    {
+        followRequestSent = await FollowerService.IsFollowRequestSentAsync(currentUserId, UserId);
+        // Kullanıcının kimliğini kontrol et ve `currentUserId`'yi ayarla
+        var authState = await CustomAuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        currentUserId = user.Claims.FirstOrDefault(c => c.Type == "nameid")?.Value;
+        currentUserName = user.Claims.FirstOrDefault(c => c.Type == "unique_name")?.Value;
+        await LoadUserProfile();
+        await LoadUserPosts();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(currentUserName))
+        {
+            var authState = await CustomAuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            currentUserName = user.Claims.FirstOrDefault(c => c.Type == "unique_name")?.Value;
+        }
+
+        ResetState();
+        // Her parametre değişiminde bu metot çalışır
+        isOwnProfile = string.IsNullOrEmpty(UserId) || UserId == currentUserId;
+        await LoadUserProfile();
+        await LoadUserPosts();
+        StateHasChanged();
+    }
+
+    private void ResetState()
+    {
+        // Tüm state değişkenlerini başlangıç durumuna sıfırlamak
+        // Profil resmini sıfırlamadan önce mevcut profil resmini tutuyoruz
+        var currentPicture = profilePicture;
+
+        // currentUserName = string.Empty;
+        followersCount = 0;
+        followingCount = 0;
+        showFollowing = false;
+        showFollowers = false;
+        followingUsers.Clear();
+        followers.Clear();
+        posts.Clear();
+        isOwnProfile = string.IsNullOrEmpty(UserId) || UserId == currentUserId;
+
+        // Profil resmini sıfırlarken mevcut resim varsa tutmaya devam ediyoruz
+        profilePicture = string.IsNullOrEmpty(currentPicture) ? "/uploads/posts/default-profile.png" : currentPicture;
+    }
+    private void OpenMessageModal()
+    {
+        isMessageModalOpen = true;
+        StateHasChanged(); // UI güncellemesini zorla
+    }
+
+    private void CloseModal()
+    {
+        isMessageModalOpen = false;
+        newMessageContent = string.Empty; // Alanı temizle
+        StateHasChanged(); // UI güncellemesini zorla
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(newMessageContent) || string.IsNullOrEmpty(UserId))
+        {
+            Console.WriteLine("Mesaj içeriği veya alıcı seçimi geçersiz.");
+            return;
+        }
+
+        // MultipartFormDataContent oluşturuyoruz
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent(newMessageContent), "Content");
+        content.Add(new StringContent(UserId), "ReceiverId");
+
+        // Seçili dosya var mı kontrol et ve dosyayı ekle
+        if (selectedFile != null)
+        {
+            var fileContent = new StreamContent(selectedFile.OpenReadStream(maxAllowedSize: 1024 * 1024 * 5)); // Maksimum 5 MB
+            fileContent.Headers.ContentType = new MediaTypeHeaderValue(selectedFile.ContentType);
+            content.Add(fileContent, "Media", selectedFile.Name);
+        }
+
+        // API çağrısı
+        var response = await MessageService.SendMessageAsync(content);
+
+        if (response.Success)
+        {
+            Console.WriteLine("Mesaj başarıyla gönderildi.");
+            newMessageContent = string.Empty; // Mesaj içeriğini temizle
+            selectedFile = null; // Seçilen dosyayı temizle
+            isMessageModalOpen = false; // Mesaj modalını kapat
+        }
+        else
+        {
+            Console.WriteLine("Mesaj gönderilirken hata oluştu.");
+        }
+    }
+
+
+
+
+    private async Task LoadUserPosts()
+    {
+        if (isOwnProfile)
+        {
+            // Kendi profilindeyse kendi gönderilerini getir
+            var response = await PostService.GetUserPostsAsync();
+            if (response.Success)
+            {
+                posts = response.Data;
+            }
+            else
+            {
+                Console.WriteLine("Gönderiler yüklenirken hata oluştu.");
+            }
+        }
+        else
+        {
+            // Başka birinin profiline girdiyse ve takip ediyorsa gönderileri getir
+            var response = await PostService.GetUserPostsIfFollowedAsync(UserId);
+            if (response.Success)
+            {
+                postsFollowed = response.Data;
+            }
+            else
+            {
+                Console.WriteLine("Gönderiler yüklenirken hata oluştu veya kullanıcı takip edilmiyor.");
+            }
+        }
+    }
+    private async Task DeletePost(int postId)
+    {
+        bool confirmDelete = await JS.InvokeAsync<bool>("confirm", "Bu gönderiyi silmek istediğinize emin misiniz?");
+        if (!confirmDelete) return;
+
+        var response = await PostService.DeletePostAsync(postId);
+        if (response.Success)
+        {
+            posts.RemoveAll(p => p.PostId == postId);
+            StateHasChanged(); // UI'yı güncellemek için çağrılır
+            Console.WriteLine("Gönderi başarıyla silindi.");
+        }
+        else
+        {
+            Console.WriteLine("Gönderi silinirken hata oluştu.");
+        }
+    }
+
+    private void OpenEditModal(UnifiedPostDto post)
+    {
+        isEditModalOpen = true;
+        selectedPost = post;
+        selectedPostContent = post.Content;
+    }
+
+    private void CloseEditModal()
+    {
+        isEditModalOpen = false;
+        selectedEditFile = null;
+    }
+
+    private void HandleEditFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedEditFile = e.File;
+    }
+    private async Task UpdatePost()
+    {
+        if (selectedPost == null) return;
+
+        var updatePostDto = new UpdatePostDto
+            {
+                Content = selectedPostContent
+                // Media = selectedEditFile
+            };
+
+        var response = await PostService.UpdatePostAsync(selectedPost.PostId, updatePostDto);
+        if (response.Success)
+        {
+            // Güncelleme başarılı olduğunda gönderiyi güncelle
+            selectedPost.Content = updatePostDto.Content;
+            if (selectedEditFile != null)
+            {
+                selectedPost.ImageUrl = $"/uploads/posts/{selectedEditFile.Name}";
+            }
+            CloseEditModal();
+            await LoadUserPosts();
+        }
+        else
+        {
+            Console.WriteLine("Güncelleme sırasında hata oluştu.");
+        }
+    }
+
+    private async Task CreatePost()
+    {
+        if (string.IsNullOrWhiteSpace(postContent))
+        {
+            Console.WriteLine("Gönderi içeriği boş olamaz.");
+            return;
+        }
+
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent(postContent), "Content");
+
+        // Seçili dosya var mı kontrol et ve dosyayı ekle
+        if (selectedFile != null)
+        {
+            var fileContent = new StreamContent(selectedFile.OpenReadStream(maxAllowedSize: 1024 * 1024 * 5)); // Maksimum 5 MB
+            fileContent.Headers.ContentType = new MediaTypeHeaderValue(selectedFile.ContentType);
+            content.Add(fileContent, "Media", selectedFile.Name);
+        }
+
+
+        // API çağrısı
+        var response = await PostService.CreatePostAsync(content);
+
+        if (response.Success)
+        {
+            Console.WriteLine("Gönderi başarıyla paylaşıldı.");
+            postContent = string.Empty;  // Gönderi içeriğini temizle
+            selectedFile = null;         // Seçilen dosyayı temizle
+            await LoadUserPosts();       // Gönderi listesini güncelle
+        }
+        else
+        {
+            Console.WriteLine("Gönderi paylaşılırken hata oluştu.");
+        }
+    }
+
+
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        Console.WriteLine($"Seçilen dosya: {selectedFile.Name}");
+    }
+    private void NavigateToProfile(string UserId)
+    {
+        NavigationManager.NavigateTo($"/profiles/{UserId}");
+    }
+
+    private async Task ShowPostLikes(int postId)
+    {
+        showLikes = !showLikes;
+
+        if (showLikes)
+        {
+            var response = await LikeService.GetPostLikesAsync(postId);
+            if (response.Success)
+            {
+                postLikes = response.Data;
+            }
+            else
+            {
+                Console.WriteLine("Beğeniler yüklenirken hata oluştu.");
+            }
+        }
+    }
+    private async Task LoadUserProfile()
+    {
+
+
+        var response = isOwnProfile
+          ? await ProfileService.GetUserProfileAsync()
+          : await ProfileService.GetUserProfileByIdAsync(UserId);
+
+        if (response.Success)
+        {
+
+
+            Name = response.Data.Name;
+            Surname = response.Data.Surname;
+            profileUserName = response.Data.UserName;
+            profilePicture = response.Data.ProfilePicture ?? "/uploads/posts/default-profile.png";
+            followersCount = response.Data.FollowersCount;
+            followingCount = response.Data.FollowingCount;
+
+
+            // Kullanıcının takip edilip edilmediğini kontrol et
+            if (!isOwnProfile && !string.IsNullOrEmpty(currentUserId) && !string.IsNullOrEmpty(UserId))
+            {
+                isFollowing = await FollowerService.IsFollowingAsync(currentUserId, UserId);
+
+                // Kontrol sonrası isFollowing değerini yazdırarak doğru olup olmadığını gözlemleyin
+                Console.WriteLine($"isFollowing: {isFollowing}");
+            }
+        }
+        else
+        {
+            Console.WriteLine("Profil bilgileri yüklenirken hata oluştu.");
+        }
+    }
+
+
+    private async Task SendFollowRequest()
+    {
+        var response = await FollowerService.FollowUserAsync(UserId);
+        if (response.Success)
+        {
+            followRequestSent = true; // Takip isteği gönderildiğini işaretle
+            Console.WriteLine("Takip isteği gönderildi.");
+        }
+        else
+        {
+            Console.WriteLine("Takip isteği gönderilirken hata oluştu.");
+        }
+    }
+    private async Task UnfollowUser()
+    {
+        var response = await FollowerService.UnfollowUserAsync(UserId);
+        if (response.Success)
+        {
+            isFollowing = false;
+            followersCount--;
+            Console.WriteLine("Kullanıcı takipten çıkarıldı.");
+        }
+        else
+        {
+            Console.WriteLine("Kullanıcı takipten çıkarılırken hata oluştu.");
+        }
+    }
+    private async Task FollowUser()
+    {
+        var response = await FollowerService.FollowUserAsync(UserId);
+        if (response.Success)
+        {
+            followRequestSent = true; // Takip etme durumu güncelleniyor
+                                      // followersCount++;
+            Console.WriteLine("Kullanıcı takip edildi.");
+        }
+        else
+        {
+            Console.WriteLine("Takip etme sırasında hata oluştu.");
+        }
+    }
+
+    private async Task UploadProfilePicture(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file != null)
+        {
+            var content = new MultipartFormDataContent();
+            var fileContent = new StreamContent(file.OpenReadStream(maxAllowedSize: 1024 * 1024 * 5)); // 5 MB
+            fileContent.Headers.ContentType = new MediaTypeHeaderValue(file.ContentType);
+            content.Add(fileContent, "Image", file.Name);
+
+            var response = await ProfileService.UploadProfilePictureAsync(content);
+
+            if (response.Success)
+            {
+
+                profilePicture = $"{response.Data}?v={Guid.NewGuid()}"; // Benzersiz bir parametre ekler
+                StateHasChanged();  // UI'ı günceller
+                Console.WriteLine("Profil resmi başarıyla yüklendi.");
+            }
+            else
+            {
+                Console.WriteLine("Profil resmi yüklenirken hata oluştu.");
+            }
+        }
+    }
+
+    private async Task DeleteProfilePicture()
+    {
+        var response = await ProfileService.DeleteProfilePictureAsync();
+
+        if (response.Success)
+        {
+
+            profilePicture = "/uploads/default-profile.png";
+            Console.WriteLine("Profil resmi başarıyla silindi.");
+        }
+        else
+        {
+            Console.WriteLine("Profil resmi silinirken hata oluştu.");
+        }
+    }
+
+    private async Task ShowFollowing()
+    {
+        showFollowing = !showFollowing;
+        var userIdToUse = string.IsNullOrEmpty(UserId) ? currentUserId : UserId;
+        if (showFollowing)
+        {
+            var response = await ProfileService.GetFollowingUsersByUserIdAsync(userIdToUse);
+            if (response.Success)
+            {
+                followingUsers = response.Data;
+            }
+        }
+    }
+
+    private async Task ShowFollowers()
+    {
+        showFollowers = !showFollowers;
+        var userIdToUse = string.IsNullOrEmpty(UserId) ? currentUserId : UserId;
+        if (showFollowers)
+        {
+            var response = await ProfileService.GetFollowersByUserIdAsync(userIdToUse);
+            if (response.Success)
+            {
+                followers = response.Data;
+            }
+        }
+    }
+
+
+    private async Task ToggleLike(UnifiedPostDto post)
+    {
+        // Beğeni güncellemesi öncesi mevcut durumu güncelle
+        post.IsLikedByCurrentUser = !post.IsLikedByCurrentUser;
+        post.LikesCount += post.IsLikedByCurrentUser ? 1 : -1;
+
+        // UI güncelleme
+        await InvokeAsync(StateHasChanged);
+
+        // Beğeni API çağrısı
+        var response = await LikeService.LikePostAsync(post.PostId);
+
+        if (!response.Success)
+        {
+            // Hata durumunda geri alma
+            post.IsLikedByCurrentUser = !post.IsLikedByCurrentUser;
+            post.LikesCount += post.IsLikedByCurrentUser ? 1 : -1;
+        }
+        else
+        {
+            // Gerekirse tüm gönderileri yeniden yükleyerek durumu güncelle
+            await LoadUserPosts();
+        }
+    }
+
+
+    private void UpdatePostInList(UnifiedPostDto updatedPost)
+    {
+        // İlgili postu liste içerisinde bul ve güncelle
+        var originalPost = unifiedpost.FirstOrDefault(p => p.PostId == updatedPost.PostId);
+        if (originalPost != null)
+        {
+            originalPost.IsLikedByCurrentUser = updatedPost.IsLikedByCurrentUser;
+            originalPost.LikesCount = updatedPost.LikesCount;
+        }
+    }
+
+
+
+    private async Task ToggleCommentSection(int postId)
+    {
+        var post = isOwnProfile ? (object)posts.FirstOrDefault(p => p.PostId == postId)
+                                : (object)postsFollowed.FirstOrDefault(p => p.PostId == postId);
+
+        if (post is PostListDto ownPost)
+        {
+            ownPost.ShowCommentSection = !ownPost.ShowCommentSection;
+
+            if (ownPost.ShowCommentSection && ownPost.Comments.Count == 0)
+            {
+                // Kendi gönderilerinize ait yorumları çekiyoruz
+                var comments = await CommentService.GetCommentsForUserPostsAsync();
+                var postComments = comments
+                    .Where(c => c.PostId == postId)
+                    .Select(c => new CommentDto
+                        {
+                            CommentId = c.CommentId,
+                            PostId = c.PostId,
+                            Content = c.Content,
+                            CreatedDate = c.CreatedDate,
+                            UserName = c.UserName,
+                            UserId = c.UserId
+
+                        })
+                    .ToList();
+
+                ownPost.Comments = postComments;
+            }
+        }
+        else if (post is FollowedUsersPostListDto followedPost)
+        {
+            followedPost.ShowCommentSection = !followedPost.ShowCommentSection;
+
+            if (followedPost.ShowCommentSection && followedPost.Comments.Count == 0)
+            {
+                // Takip edilen kullanıcıların gönderilerine ait yorumları çekiyoruz
+                var comments = await CommentService.GetCommentsForFollowedUsersPostsAsync();
+                var postComments = comments
+                    .Where(c => c.PostId == postId)
+                    .Select(c => new CommentDto
+                        {
+                            CommentId = c.CommentId,
+                            PostId = c.PostId,
+                            Content = c.Content,
+                            CreatedDate = c.CreatedDate,
+                            UserName = c.UserName,
+                            UserId = c.UserId
+                        })
+                    .ToList();
+
+                followedPost.Comments = postComments;
+            }
+        }
+    }
+
+
+    private async Task AddComment(int postId, string commentContent)
+    {
+        if (string.IsNullOrWhiteSpace(commentContent))
+        {
+            Console.WriteLine("Yorum içeriği boş olamaz.");
+            return;
+        }
+
+        var commentDto = new CreateCommentDto
+            {
+                PostId = postId,
+                Content = commentContent
+            };
+
+        await CommentService.AddCommentAsync(commentDto);
+
+
+        var userName = currentUserName;
+
+        // İlgili gönderiyi bul ve yorumu ekle
+        var post = postsFollowed.FirstOrDefault(p => p.PostId == postId);
+        if (post != null)
+        {
+            post.Comments.Add(new CommentDto
+                {
+                    Content = commentContent,
+                    UserName = userName,
+                    CreatedDate = DateTime.Now,
+                    UserId = currentUserId
+                });
+
+            // Yorum alanını temizle
+            post.NewCommentContent = string.Empty;
+
+            // await LoadUserPosts();
+            // StateHasChanged(); // U
+        }
+
+        else
+        {
+            Console.WriteLine("Yorum eklenirken hata oluştu.");
+        }
+    }
+
+    private async Task DeleteComment(int postId, int commentId)
+    {
+        var result = await CommentService.DeleteCommentAsync(commentId);
+        if (result)
+        {
+            var post = posts.FirstOrDefault(p => p.PostId == postId);
+            var comment = post?.Comments.FirstOrDefault(x => x.CommentId == commentId);
+
+            if (comment.UserId == currentUserId || post.UserId == currentUserId)
+            {
+                if (post != null)
+                {
+                    post.Comments.RemoveAll(c => c.CommentId == commentId);
+
+                    post.CommentsCount--;
+
+                    StateHasChanged();
+                }
+
+            }
+
+        }
+        else
+        {
+            Console.WriteLine("Yorum silinirken bir hata oluştu.");
+        }
+    }
+
+    private void OpenEditCommentModal(int postId, CommentDto comment)
+    {
+        editingCommentId = comment.CommentId;
+        editingPostId = postId;
+        editingCommentContent = comment.Content;
+        isEditCommentModalOpen = true;
+    }
+
+    private void CloseEditCommentModal()
+    {
+        isEditCommentModalOpen = false;
+        editingCommentContent = string.Empty;
+    }
+
+    private async Task UpdateComment()
+    {
+        if (string.IsNullOrWhiteSpace(editingCommentContent))
+        {
+            Console.WriteLine("Yorum içeriği boş olamaz.");
+            return;
+        }
+
+        var result = await CommentService.UpdateCommentAsync(editingCommentId, editingCommentContent);
+
+        var post = unifiedpost.FirstOrDefault(p => p.PostId == editingPostId);
+        if (post != null)
+        {
+            var comment = post.Comments.FirstOrDefault(c => c.CommentId == editingCommentId);
+            if (comment != null)
+            {
+                comment.Content = editingCommentContent;
+
+
+            }
+        }
+
+        var ownPost = posts.FirstOrDefault(p => p.PostId == editingPostId);
+        if (ownPost != null)
+        {
+            var ownComment = ownPost.Comments.FirstOrDefault(c => c.CommentId == editingCommentId);
+            if (ownComment != null)
+            {
+                ownComment.Content = editingCommentContent;
+            }
+        }
+
+        // PostsFollowed listesinde güncelleme (başkasının profili için)
+        var followedPost = postsFollowed.FirstOrDefault(p => p.PostId == editingPostId);
+        if (followedPost != null)
+        {
+            var followedComment = followedPost.Comments.FirstOrDefault(c => c.CommentId == editingCommentId);
+            if (followedComment != null)
+            {
+                followedComment.Content = editingCommentContent;
+            }
+        }
+        CloseEditCommentModal();
+       
+
+
+    }
+    private void ShowEditNameModal()
+    {
+        // Güncel değerleri inputlara yükle
+        newName = Name ?? string.Empty;
+        newSurname = Surname ?? string.Empty;
+        newUserName = currentUserName ?? string.Empty;
+
+        isEditNameModalOpen = true;
+    }
+
+    private void CloseEditNameModal()
+    {
+        isEditNameModalOpen = false;
+        newName = string.Empty;
+        newSurname = string.Empty;
+        newUserName = string.Empty;
+    }
+    private async Task UpdateUserName()
+    {
+        if (string.IsNullOrWhiteSpace(newName) || string.IsNullOrWhiteSpace(newSurname))
+        {
+            Console.WriteLine("Ad ve soyad boş bırakılamaz.");
+            return;
+        }
+
+        var updateDto = new UpdateUserNameDto
+            {
+                Name = newName,
+                Surname = newSurname,
+                UserName = newUserName
+            };
+
+        var response = await ProfileService.UpdateUserNameAsync(updateDto);
+
+        if (response.Success)
+        {
+            currentUserName = $"{newUserName}";
+            Name = $"{newName}";
+            Surname = $"{newSurname}";
+            CloseEditNameModal();
+            LoadUserProfile();
+            Console.WriteLine("Ad ve soyad başarıyla güncellendi.");
+        }
+        else
+        {
+            Console.WriteLine("Ad ve soyad güncellenirken hata oluştu.");
+        }
+    }
+
+
+
+}
+
+<style>
+    .message-modal-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .message-modal {
+        background: #fff;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        width: 400px;
+        max-width: 90%;
+    }
+
+
+    .edit-button {
+        background: none;
+        border: none;
+        color: blue;
+        font-size: 20px;
+        cursor: pointer;
+        transition: color 0.3s;
+    }
+
+        .edit-button:hover {
+            color: darkblue;
+        }
+
+    .edit-modal {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background-color: white;
+        padding: 20px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+        .edit-modal h4 {
+            margin-bottom: 10px;
+        }
+
+        .edit-modal .form-control {
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        .edit-modal .btn {
+            margin-right: 10px;
+        }
+
+    .post-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .delete-button {
+        background-color: transparent;
+        border: none;
+        color: red;
+        font-size: 20px;
+        cursor: pointer;
+        transition: color 0.3s;
+    }
+
+        .delete-button:hover {
+            color: darkred;
+        }
+
+    .profile-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 20px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        background-color: #f8f9fa;
+    }
+
+    .profile-picture {
+        width: 150px;
+        height: 150px;
+        border-radius: 50%;
+        object-fit: cover;
+    }
+
+    .profile-picture, .mini-profile-picture {
+        border-radius: 50%;
+        object-fit: cover;
+    }
+
+    .mini-profile-picture {
+        width: 30px;
+        height: 30px;
+        margin-right: 5px;
+        border-radius: 50%;
+    }
+
+    .form-control {
+        margin-top: 10px;
+    }
+
+    .post-create {
+        width: 100%;
+        margin-top: 20px;
+        padding: 15px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        background-color: #fff;
+    }
+
+    .post-list {
+        list-style: none;
+        padding: 0;
+    }
+
+    .post-item {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        padding: 15px;
+        background-color: #fff;
+    }
+
+    .post-media {
+        max-width: 100%;
+        margin-top: 10px;
+        border-radius: 5px;
+    }
+
+    .heart-icon {
+        font-size: 1.5em; /* İkon boyutu */
+        cursor: pointer;
+        transition: color 0.3s;
+    }
+
+        .heart-icon:hover {
+            color: red; /* Üzerine gelindiğinde kırmızı olur */
+        }
+
+    .like-button {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1.5em; /* İkon boyutu */
+    }
+
+    .like-count {
+        margin-left: 10px;
+        font-size: 1.1em;
+        color: #666;
+    }
+
+    .comment-section {
+        margin-top: 10px;
+    }
+
+    .comment-input {
+        width: 100%;
+        margin-bottom: 10px;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+    }
+
+    .comments-list {
+        margin-top: 10px;
+        border-top: 1px solid #ddd;
+        padding-top: 10px;
+    }
+
+    .likes-list {
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        margin-top: 10px;
+        background-color: #f9f9f9;
+    }
+
+    .like-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+    }
+
+    .comment {
+        position: relative;
+        margin-bottom: 10px;
+    }
+
+    .delete-comment {
+        background-color: transparent;
+        border: none;
+        color: red;
+        font-size: 20px;
+        cursor: pointer;
+        transition: color 0.3s;
+    }
+
+        .delete-comment:hover {
+            color: darkred;
+        }
+
+    .edit-comment {
+        background-color: transparent;
+        border: none;
+        color: blue;
+        font-size: 20px;
+        cursor: pointer;
+        transition: color 0.3s;
+    }
+
+        .edit-comment:hover {
+            color: darkblue;
+        }
+</style>

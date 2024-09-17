@@ -1,0 +1,400 @@
+﻿@page "/messages"
+@using BlazorServerUI.AuthenticationProvider
+@using BlazorServerUI.Data.MessageDtos
+@using BlazorServerUI.Services.MessageServices
+@using System.Net.Http.Headers
+@inject IJSRuntime JS;
+@inject MessageService MessageService
+@inject CustomAuthStateProvider CustomAuthenticationStateProvider
+<h3>Mesajlar</h3>
+
+@if (isLoading)
+{
+    <p>Yükleniyor...</p>
+}
+else
+{
+    <div class="messages-container">
+        <!-- Mesajlaşmaların Listesi -->
+        <div class="threads-list">
+            <h4>Mesajlaştığın Kişiler</h4>
+            @if (messageThreads.Any())
+            {
+                <ul>
+                    @foreach (var thread in messageThreads)
+                    {
+                        <li @onclick="() => LoadMessages(thread.ThreadId)" class="thread-item">
+                            <img src="@thread.ParticipantProfilePicture" alt="Profil Resmi" class="mini-profile-picture" />
+                            <span>@thread.ParticipantName</span>
+                            <small>@thread.LastMessageDate.ToString("yyyy-MM-dd HH:mm")</small>
+                            @if (!thread.IsRead)
+                            {
+                                <span class="unread-indicator">●</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <p>Henüz kimseyle mesajlaşmadınız.</p>
+            }
+        </div>
+
+        <!-- Mesajlaşma Alanı -->
+        <div class="messages-thread">
+            @if (selectedMessages.Any())
+            {
+                <h4>@selectedParticipantName ile Mesajlaşma</h4>
+                <div class="messages-list">
+                    @foreach (var message in selectedMessages)
+                    {
+                        <div class="message-item @(message.SenderId == currentUserId ? "sent" : "received")">
+                            <div class="message-content">
+                                <p>
+                                    <strong>@(message.SenderId == currentUserId ? "Siz" : message.SenderName)</strong>
+                                      @if (message.SenderId == currentUserId)
+                            {
+                                   <button @onclick="() => DeleteMessage(message.MessageId)" class="delete-button">❌</button>
+                            }
+                                </p>
+                                <p>@message.Content</p>
+                                @if (!string.IsNullOrEmpty(message.MediaUrl))
+                                {
+                                    <img src="@message.MediaUrl" alt="Media" class="message-media" style="width:300px; height:200px;" />
+                                }
+                                <small>@message.CreatedDate.ToString("yyyy-MM-dd HH:mm")</small>
+                                @if (message.UpdatedDate.HasValue)
+                                {
+                                    <small class="text-muted">(Düzenlendi)</small>
+                                }
+                            </div>
+                            <!-- Mesaj meta bilgileri ve güncelleme ikonu -->
+                            @if (message.SenderId == currentUserId)
+                            {
+                                
+                            
+                            <div class="message-meta">
+                                <button @onclick="() => OpenEditModal(message)" class="edit-button">🖉</button>
+                            </div>
+                            }
+                        </div>
+
+                    }
+                </div>
+
+                <!-- Mesaj Gönderme Alanı -->
+                <div class="send-message-area">
+                    <textarea @bind="newMessageContent" class="form-control" rows="3" placeholder="Mesajınızı yazın..."></textarea>
+                    <InputFile OnChange="HandleFileSelected" class="form-control mt-2" />
+                    <button class="btn btn-primary mt-2" @onclick="SendMessage">Gönder</button>
+                </div>
+            }
+            else
+            {
+                <p>Mesajlaşmak için bir kullanıcı seçin.</p>
+            }
+        </div>
+    </div>
+}
+@if (isEditModalOpen)
+{
+    <div class="edit-modal">
+        <h4>Mesajı Düzenle</h4>
+        <textarea @bind="editedMessageContent" class="form-control" rows="4"></textarea>
+        <button class="btn btn-primary mt-2" @onclick="UpdateMessage">Güncelle</button>
+        <button class="btn btn-secondary mt-2" @onclick="CloseEditModal">İptal</button>
+    </div>
+}
+@code {
+    private bool isLoading = true;
+    private List<MessageThreadDto> messageThreads = new List<MessageThreadDto>();
+    private List<MessageDto> selectedMessages = new List<MessageDto>();
+    private string? selectedParticipantName;
+    private string newMessageContent = string.Empty;
+    private string? selectedThreadId;
+    private string? currentUserId;
+    private IBrowserFile? selectedFile = null;
+    private bool isMessageModalOpen = false;
+    private string editedMessageContent = string.Empty;
+    private int editingMessageId;
+    private bool isEditModalOpen = false;
+    private int unreadMessageCount = 0;
+
+    [CascadingParameter] private NavMenu NavMenu { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await CustomAuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        currentUserId = user.Claims.FirstOrDefault(c => c.Type == "nameid")?.Value;
+
+        await LoadMessageThreads();
+
+        isLoading = false;
+    }
+
+    private async Task LoadMessageThreads()
+    {
+        var response = await MessageService.GetMessageThreadsAsync();
+        if (response.Success)
+        {
+            messageThreads = response.Data;
+        }
+        else
+        {
+            Console.WriteLine("Mesajlaşma listesi yüklenirken hata oluştu.");
+        }
+    }
+
+    private async Task LoadMessages(string threadId)
+    {
+        selectedThreadId = threadId;
+        var response = await MessageService.GetMessagesAsync(threadId);
+        if (response.Success)
+        {
+            selectedMessages = response.Data;
+            selectedParticipantName = messageThreads.FirstOrDefault(t => t.ThreadId == threadId)?.ParticipantName;
+
+            foreach (var message in selectedMessages.Where(m => !m.IsRead && m.ReceiverId == currentUserId))
+            {
+                await MessageService.MarkAsReadAsync(message.MessageId);
+            }
+
+            // Okunmamış mesaj sayısını güncelle
+            await NavMenu.UpdateUnreadMessageCount();// NavMenu'nun güncellenmesini sağla
+        }
+        else
+        {
+            Console.WriteLine("Mesajlar yüklenirken hata oluştu.");
+        }
+    }
+
+    private async Task UpdateUnreadMessageCount()
+    {
+        unreadMessageCount = await MessageService.GetUnreadMessageCountAsync();
+    }
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(newMessageContent) || string.IsNullOrEmpty(selectedThreadId))
+        {
+            Console.WriteLine("Mesaj içeriği veya alıcı seçimi geçersiz.");
+            return;
+        }
+
+        // MultipartFormDataContent oluşturuyoruz
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent(newMessageContent), "Content");
+        content.Add(new StringContent(selectedThreadId), "ReceiverId");
+
+        // Seçili dosya var mı kontrol et ve dosyayı ekle
+        if (selectedFile != null)
+        {
+            var fileContent = new StreamContent(selectedFile.OpenReadStream(maxAllowedSize: 1024 * 1024 * 5)); // Maksimum 5 MB
+            fileContent.Headers.ContentType = new MediaTypeHeaderValue(selectedFile.ContentType);
+            content.Add(fileContent, "Media", selectedFile.Name);
+        }
+
+        // API çağrısı
+        var response = await MessageService.SendMessageAsync(content);
+
+        if (response.Success)
+        {
+            Console.WriteLine("Mesaj başarıyla gönderildi.");
+            newMessageContent = string.Empty; // Mesaj içeriğini temizle
+            selectedFile = null; // Seçilen dosyayı temizle
+            await LoadMessages(selectedThreadId); // Mesaj gönderildikten sonra mesajları yeniden yükle
+        }
+        else
+        {
+            Console.WriteLine("Mesaj gönderilirken hata oluştu.");
+        }
+    }
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        Console.WriteLine($"Seçilen dosya: {selectedFile.Name}");
+    }
+    private void CloseEditModal()
+    {
+        isEditModalOpen = false;
+        editedMessageContent = string.Empty;
+    }
+    private void OpenEditModal(MessageDto message)
+    {
+        isEditModalOpen = true;
+        editedMessageContent = message.Content;
+        editingMessageId = message.MessageId;
+    }
+
+    private async Task UpdateMessage()
+    {
+        var updateDto = new UpdateMessageDto { Content = editedMessageContent };
+        var response = await MessageService.UpdateMessageAsync(editingMessageId, updateDto);
+
+        if (response.Success)
+        {
+            Console.WriteLine("Mesaj başarıyla güncellendi.");
+            CloseEditModal();
+            await LoadMessages(selectedThreadId); // Güncellenen mesajı yeniden yükleyin
+        }
+        else
+        {
+            Console.WriteLine("Mesaj güncellenirken hata oluştu.");
+        }
+    }
+
+    private async Task DeleteMessage(int messageId)
+    {
+        var response = await MessageService.DeleteMessageAsync(messageId);
+        if (response.Success)
+        {
+            // Mesaj başarıyla silindi, mesaj listesini güncelle
+            selectedMessages = selectedMessages.Where(m => m.MessageId != messageId).ToList();
+            // await LoadMessages(selectedThreadId);
+            Console.WriteLine("Mesaj başarıyla silindi.");
+        }
+        else
+        {
+            Console.WriteLine("Mesaj silinirken hata oluştu.");
+        }
+    }
+}
+
+<style>
+    .messages-container {
+        display: flex;
+        gap: 20px;
+    }
+
+    .threads-list {
+        flex: 1;
+        border: 1px solid #ddd;
+        padding: 10px;
+        border-radius: 8px;
+    }
+
+    .messages-thread {
+        flex: 2;
+        border: 1px solid #ddd;
+        padding: 10px;
+        border-radius: 8px;
+    }
+
+    .thread-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+        padding: 5px 0;
+    }
+
+        .thread-item:hover {
+            background-color: #f1f1f1;
+        }
+
+    .unread-indicator {
+        color: red;
+        font-size: 1.2em;
+        margin-left: 10px;
+    }
+
+    .message-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin: 5px 0;
+        padding: 10px;
+        border-radius: 5px;
+    }
+
+    .sent {
+        background-color: #e0ffe0;
+        flex-direction: row-reverse;
+    }
+
+    .received {
+        background-color: #ffe0e0;
+    }
+
+    .message-content {
+        flex: 1;
+        text-align: left;
+        margin-right: 10px;
+    }
+
+    .sent .message-content {
+        margin-right: 0;
+        margin-left: 10px;
+    }
+
+    .message-meta {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+    }
+
+    .edit-button {
+        background: none;
+        border: none;
+        color: blue;
+        font-size: 20px;
+        cursor: pointer;
+        transition: color 0.3s;
+    }
+
+        .edit-button:hover {
+            color: darkblue;
+        }
+
+    @* .message-media {
+        max-width: 200px;
+        margin-top: 10px;
+        border-radius: 5px;
+    }
+ *@
+    .send-message-area {
+        margin-top: 10px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .edit-modal {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background-color: white;
+        padding: 20px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+        .edit-modal h4 {
+            margin-bottom: 10px;
+        }
+
+        .edit-modal .form-control {
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        .edit-modal .btn {
+            margin-right: 10px;
+        }
+
+        .delete-button {
+        background: none;
+        border: none;
+        color: red;
+        font-size: 18px;
+        cursor: pointer;
+        transition: color 0.3s;
+    }
+
+    .delete-button:hover {
+        color: darkred;
+    }
+</style>

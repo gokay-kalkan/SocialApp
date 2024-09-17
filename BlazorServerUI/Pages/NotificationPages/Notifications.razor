@@ -1,0 +1,316 @@
+﻿@page "/notifications"
+
+@using BlazorServerUI.AuthenticationProvider
+@using BlazorServerUI.Data.NotificationsDtos
+@using BlazorServerUI.Services.FollowerServices
+@using BlazorServerUI.Services.NotificationServices
+@inject FollowRequestNotificationService FollowRequestNotificationService
+@inject FollowerService FollowerService
+@inject NotificationService NotificationService
+@inject NavigationManager NavigationManager
+@inject CustomAuthStateProvider CustomAuthenticationStateProvider
+
+<h3>Bildirimler</h3>
+
+@if (isLoading)
+{
+    <p>Yükleniyor...</p>
+}
+else if (notifications.Any())
+{
+    <ul>
+        @foreach (var notification in notifications)
+        {
+            <li>
+                <p>@notification.Type - @notification.CreatedDate.ToShortTimeString()</p>
+
+                @* Geri takip onay ve reddet butonları için kontrol *@
+                @if (notification.Type.Contains("sizi geri takip etmek istiyor") && notification.IsFollowBackPending && !notification.IsFollowedBack)
+                {
+                    <button class="btn btn-success" @onclick="() => ApproveFollowBack(notification.RequesterId, notification.FollowRequestId)">Geri Takip Onayla</button>
+                    <button class="btn btn-danger" @onclick="() => RejectFollowBack(notification.RequesterId, notification.FollowRequestId)">Reddet</button>
+                }
+                @* Takip isteği "Pending" (beklemede) olduğunda onayla/reddet butonlarını göster *@
+                else if (notification.Status == "Pending" && notification.Type.Contains("size Takip İsteği Gönderdi"))
+                {
+                    <button class="btn btn-success" @onclick="() => ApproveFollowRequest(notification.FollowRequestId, notification.RequesterId)">Onayla</button>
+                    <button class="btn btn-danger" @onclick="() => RejectFollowRequest(notification.FollowRequestId)">Reddet</button>
+                }
+                @* Takip isteği onaylandı ve geri takip edilmediyse geri takip et butonunu göster *@
+                else if (notification.IsApproved && !notification.IsFollowedBack && !notification.IsFollowBackPending && !notification.Type.Contains("Takip İsteğinizi Onayladı"))
+                {
+                    <button class="btn btn-primary" @onclick="() => FollowBack(notification.RequesterId, notification.FollowRequestId)">Geri Takip Et</button>
+                    <button class="btn btn-primary" @onclick="() => CancelFollowBack(notification.RequesterId, notification.FollowRequestId)">İptal</button>
+                }
+                @* Geri takip onayı bekliyorsa bilgi mesajı göster *@
+                else if (notification.IsApproved && notification.IsFollowBackPending)
+                {
+                    <p>Geri takip isteğiniz onay bekliyor.</p>
+                }
+                @* Geri takip onaylandıysa bilgi mesajı göster *@
+                else if (notification.IsApproved && notification.IsFollowedBack)
+                {
+                    <p>Bu isteği onayladınız ve geri takip edildi.</p>
+                }
+                @* Takip isteği onaylandıysa sadece bilgi mesajı göster ve butonları gösterme *@
+                else if (notification.Type.Contains("Takip İsteğinizi Onayladı"))
+                {
+                    <p></p>
+                }
+
+                else if (notification.Type.Contains("Geri takip isteğinizi onayladı"))
+                {
+
+                    <p>Geri Takip İsteğiniz Onaylandı</p>
+                }
+
+                else if (approveFollowBack && !notification.IsFollowBackPending)
+                {
+                    <p>Geri Takip İsteğini Onayladınız</p>
+                }
+            </li>
+        }
+    </ul>
+}
+else
+{
+    <p>Henüz bir bildiriminiz yok.</p>
+}
+
+@* Diğer bildirimler (beğeni, yorum vs.) *@
+@if (notificationAllList.Any())
+{
+    <h4>Diğer Bildirimler</h4>
+    <ul>
+        @foreach (var notification in notificationAllList)
+        {
+            <li>
+                <p>@notification.Type - @notification.CreatedDate.ToShortTimeString()</p>
+            </li>
+        }
+    </ul>
+}
+
+
+@code {
+    private List<FollowRequestNotificationListDto> notifications = new List<FollowRequestNotificationListDto>();
+    private List<NotificationListDto> notificationAllList = new List<NotificationListDto>();
+    private bool isLoading = true;
+    private string? currentUserId;
+    private bool approveFollowBack;
+
+    [CascadingParameter] private NavMenu NavMenu { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await CustomAuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        currentUserId = user.Claims.FirstOrDefault(c => c.Type == "nameid")?.Value;
+        await LoadNotifications();
+        await LoadAllNotifications();
+  
+    }
+
+    private async Task LoadNotifications()
+    {
+        isLoading = true;
+        var response = await FollowRequestNotificationService.GetUserFollowRequestNotificationsAsync();
+        if (response.Success)
+        {
+            notifications = response.Data;
+        }
+        else
+        {
+            Console.WriteLine("Bildirimler yüklenirken hata oluştu.");
+        }
+        isLoading = false;
+    }
+
+    private async Task LoadAllNotifications()
+    {
+        var response = await NotificationService.GetUserAllNotificationsAsync();
+        if (response.Success)
+        {
+            notificationAllList = response.Data;
+
+            await NavMenu.UpdateNotificationCount();
+        }
+        else
+        {
+            Console.WriteLine("Bildirimler yüklenirken hata oluştu.");
+        }
+    }
+
+ 
+   
+    private async Task ApproveFollowRequest(int followRequestId, string requesterId)
+    {
+        var response = await FollowerService.ApproveFollowRequestAsync(followRequestId);
+        if (response.Success)
+        {
+            var notification = notifications.FirstOrDefault(n => n.FollowRequestId == followRequestId);
+            if (notification != null)
+            {
+                notification.Status = "Approved";
+                notification.IsApproved = true; // İsteğin onaylandığını güncelliyoruz
+                notification.IsFollowBackPending = false; // Geri takip işlemi başlatılmadı
+                notification.IsFollowedBack = false; // Henüz geri takip edilmedi
+
+            }
+
+            // Geri takip et butonunu göstermek için güncel bildirim ekleyin
+            var followBackNotification = new FollowRequestNotificationListDto
+                {
+                    UserId = requesterId,
+                    Type = "Takip isteğiniz onaylandı. Geri takip edebilirsiniz.",
+                    CreatedDate = DateTime.UtcNow,
+                    IsRead = false,
+                    FollowRequestId = followRequestId,
+                    IsFollowBackPending = false, // Başlangıçta beklemiyor
+                    IsFollowedBack = false,
+                    // Başlangıçta geri takip edilmedi
+                };
+
+            notifications.Add(followBackNotification);
+
+           
+
+            Console.WriteLine("Takip isteği onaylandı.");
+        }
+        else
+        {
+            Console.WriteLine("Takip isteği onaylanırken hata oluştu.");
+        }
+    }
+
+    private async Task FollowBack(string requesterId, int followRequestId)
+    {
+        var followBackResponse = await FollowerService.FollowBackAsync(requesterId);
+        if (followBackResponse.Success)
+        {
+            var notification = notifications.FirstOrDefault(n => n.FollowRequestId == followRequestId);
+            if (notification != null)
+            {
+                notification.IsFollowedBack = false; // Geri takip edildi olarak işaretle
+                notification.IsFollowBackPending = true; // Geri takip onayı bekleniyor olarak işaretle
+            }
+
+            // Geri takip isteği bildirimi gönderiliyor
+            var backNotification = new FollowRequestNotificationListDto
+                {
+                    UserId = currentUserId,
+                    RequesterId = requesterId,
+                    Type = "Geri takip isteğiniz gönderildi. Onay bekleniyor.",
+                    CreatedDate = DateTime.UtcNow,
+                    IsRead = false,
+                    FollowRequestId = followRequestId,
+                    IsFollowBackPending = true,
+                    IsFollowedBack = false,
+
+                };
+
+            approveFollowBack = false; //geri takip onay durumu
+            notifications.Add(backNotification);
+            notifications.Remove(notification);
+          
+            Console.WriteLine("Geri takip isteği gönderildi.");
+        }
+        else
+        {
+            Console.WriteLine("Geri takip işlemi başarısız oldu.");
+        }
+    }
+
+
+    private async Task RejectFollowRequest(int followRequestId)
+    {
+        var response = await FollowerService.RejectFollowRequestAsync(followRequestId);
+        if (response.Success)
+        {
+            var notification = notifications.FirstOrDefault(n => n.FollowRequestId == followRequestId);
+            if (notification != null)
+            {
+                notification.Status = "Rejected";
+            }
+            await NotificationService.GetNotificationCountAsync();
+            Console.WriteLine("Takip isteği reddedildi.");
+        }
+        else
+        {
+            Console.WriteLine("Takip isteği reddedilirken hata oluştu.");
+        }
+    }
+
+    private async Task ApproveFollowBack(string followerId, int followRequestId)
+    {
+        var response = await FollowerService.ApproveFollowBackAsync(followerId, followRequestId);
+        if (response.Success)
+        {
+            // Bildirimi güncelle
+            var notification = notifications.FirstOrDefault(n => n.FollowRequestId == followRequestId);
+            if (notification != null)
+            {
+                notification.IsFollowBackPending = false; // Geri takip isteği artık beklemede değil
+                notification.IsFollowedBack = true; // Geri takip onaylandı
+
+                // Geri takip onaylandıktan sonra butonları gizlemek için bildirimi kaldırın
+                notifications.Remove(notification);
+            }
+
+            await LoadNotifications();
+            await LoadAllNotifications();
+            StateHasChanged();
+            Console.WriteLine("Geri takip isteği onaylandı.");
+        }
+        else
+        {
+            Console.WriteLine("Geri takip onaylanırken hata oluştu.");
+        }
+    }
+
+    private async Task RejectFollowBack(string followerId, int followRequestId)
+    {
+        var response = await FollowerService.RejectFollowBackAsync(followerId, followRequestId);
+        if (response.Success)
+        {
+            // Bildirimi güncelle
+            var notification = notifications.FirstOrDefault(n => n.FollowRequestId == followRequestId);
+            if (notification != null)
+            {
+                // Geri takip reddedildikten sonra butonları gizlemek için bildirimi kaldırın
+                notifications.Remove(notification);
+            }
+
+            await LoadNotifications();
+            await LoadAllNotifications();
+            StateHasChanged();
+            Console.WriteLine("Geri takip isteği reddedildi.");
+        }
+        else
+        {
+            Console.WriteLine("Geri takip reddedilirken hata oluştu.");
+        }
+    }
+
+
+
+   
+
+    private async void CancelFollowBack(string requesterId, int followRequestId)
+    {
+        var notification = notifications.FirstOrDefault(n => n.FollowRequestId == followRequestId);
+        if (notification != null)
+        {
+            // Geri Takip Et ve İptal butonlarını gizleyin
+            notifications.Remove(notification);
+            await LoadNotifications();
+            await LoadAllNotifications();
+          
+        }
+      
+        Console.WriteLine("İptal edildi, geri takip butonları kaldırıldı.");
+    }
+
+
+}
+
